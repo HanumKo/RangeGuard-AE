@@ -18,6 +18,12 @@ cd lm-evaluation-harness
 pip install -e .
 ```
 
+For figure generation, ensure these Python packages are also available:
+
+```bash
+pip install pandas numpy matplotlib
+```
+
 ## Model Preparation
 Before running the experiment, the following models should be prepared under:
 
@@ -127,3 +133,5 @@ By default, `env.sh` sets:
 - `OUTPUT_ROOT=1_LLM_accuracy/output`
 
 If the repository is cloned to another location, update `env.sh` or override the exported path variables before running the script.
+
+The figure scripts resolve their default input and output directories relative to the repository, so the default commands above work after cloning into a different path.

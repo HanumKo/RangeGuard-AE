@@ -30,6 +30,14 @@ cd ecc_coverage
 bash run.sh
 ```
 
+By default, `run.sh` uses `TRIALS=1000000000`, so a full run can take a long time.
+For a quick smoke test, you can use:
+
+```bash
+cd ecc_coverage
+TRIALS=1000 SEED=1 bash run.sh
+```
+
 ## Output
 Outputs are written under:
 

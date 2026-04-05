@@ -4,10 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 BIN="${BUILD_DIR}/ecc_cov"
+: "${CXX:=g++}"
+: "${CXXFLAGS:=-std=c++17 -O3 -DNDEBUG}"
 
 mkdir -p "${BUILD_DIR}"
 
-g++ -std=c++17 -O3 -DNDEBUG -march=native \
+"${CXX}" ${CXXFLAGS} \
   -I"${ROOT_DIR}/include" \
   -I"${ROOT_DIR}/src" \
   "${ROOT_DIR}/src/main.cpp" \

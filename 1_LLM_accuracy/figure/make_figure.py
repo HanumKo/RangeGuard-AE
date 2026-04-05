@@ -7,12 +7,14 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from pathlib import Path
 
+FIGURE_DIR = Path(__file__).resolve().parent
+
 # ======== INPUTS ========
 CSV_PATHS = [
-    Path("/root/mnt/RangeGuard_AE/1_LLM_accuracy/figure/source_csv/Llama-3.2-1B.csv"),
-    Path("/root/mnt/RangeGuard_AE/1_LLM_accuracy/figure/source_csv/Llama-3.1-8B.csv"),
+    FIGURE_DIR / "source_csv" / "Llama-3.2-1B.csv",
+    FIGURE_DIR / "source_csv" / "Llama-3.1-8B.csv",
 ]
-OUT_DIR   = Path("/root/mnt/RangeGuard_AE/1_LLM_accuracy/figure/output")
+OUT_DIR   = FIGURE_DIR / "output"
 # ========================
 
 # 높이만 줄임 (7 -> 5)

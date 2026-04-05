@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os, json, csv, argparse
+from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_BASE_DIR = REPO_ROOT / "1_LLM_accuracy" / "output"
+DEFAULT_OUT_DIR = REPO_ROOT / "1_LLM_accuracy" / "figure" / "source_csv"
 
 SCHEME_MAP = {
     "NONE": "no_protection",
@@ -67,8 +72,8 @@ def write_csv(rows: List[Dict[str, Any]], out_path: str) -> None:
 
 def main():
     p = argparse.ArgumentParser(description="Aggregate acc,none from result JSONs into per-model CSVs.")
-    p.add_argument('--base-dir', default='/root/mnt/RangeGuard_AE/1_LLM_accuracy/output', help='Root directory to scan')
-    p.add_argument('--out-dir',  default='/root/mnt/RangeGuard_AE/1_LLM_accuracy/figure/source_csv', help='Directory to write CSV files')
+    p.add_argument('--base-dir', default=str(DEFAULT_BASE_DIR), help='Root directory to scan')
+    p.add_argument('--out-dir',  default=str(DEFAULT_OUT_DIR), help='Directory to write CSV files')
     p.add_argument('--models', nargs='*', default=None, help='Whitelist of model names (e.g., Llama-3.2-1B ResNet-50)')
     p.add_argument('--require-acc-none', dest='require_acc_none', action='store_true', help='Skip JSONs without acc,none')
     args = p.parse_args()

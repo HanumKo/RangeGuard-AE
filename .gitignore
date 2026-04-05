@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 /.codex
 *.egg-info/
+/2_ECC_coverage/ecc_coverage/build/
+/2_ECC_coverage/ecc_coverage/output/*.csv
+/2_ECC_coverage/ecc_coverage/output/*.log
