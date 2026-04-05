@@ -22,6 +22,7 @@ This produces:
 The main entry points are:
 
 - `ecc_coverage/run.sh`
+- `ecc_coverage/make_ratio_tables.py`
 
 Run the experiment with:
 
@@ -43,4 +44,26 @@ Outputs are written under:
 
 ```txt
 ecc_coverage/output/
+```
+
+To generate ratio tables whose columns are ECC schemes and whose rows are patterns,
+run:
+
+```bash
+cd ecc_coverage
+python make_ratio_tables.py
+```
+
+This reads:
+
+```txt
+output/coverage_1b_all_cases.csv
+```
+
+and writes:
+
+```txt
+output/ce_ratio_table.csv
+output/due_ratio_table.csv
+output/sdc_ratio_table.csv
 ```
