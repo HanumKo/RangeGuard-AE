@@ -7,19 +7,30 @@
 #include <cstdlib>
 #include <array>
 
-constexpr int kBits      = 256;  // block bits (32B)
-constexpr int kWordBits  = 16;   // 16-bit span
-constexpr int kDwordBits = 32;   // 32-bit span
+constexpr int kPayloadBits = 256;
+constexpr int kWordBits    = 16;
+constexpr int kDwordBits   = 32;
+
+struct PatternShape {
+    int total_bits = kPayloadBits;
+    int word_bits = kWordBits;
+    int dword_bits = kDwordBits;
+
+    inline int word_spans() const { return total_bits / word_bits; }
+    inline int dword_spans() const { return total_bits / dword_bits; }
+};
 
 struct PatternRNG {
     std::mt19937_64 gen;
-    std::uniform_int_distribution<int> bit_dist{0, kBits - 1};
-    std::uniform_int_distribution<int> word_dist{0, kBits / kWordBits - 1};     // 0..15
-    std::uniform_int_distribution<int> bit_in_word_dist{0, kWordBits - 1};      // 0..15
     PatternRNG(uint64_t seed): gen(seed) {}
-    inline int rand_bit()        { return bit_dist(gen); }
-    inline int rand_word()       { return word_dist(gen); }
-    inline int rand_bit_in_word(){ return bit_in_word_dist(gen); }
+
+    inline int rand_bit(int total_bits) {
+        return std::uniform_int_distribution<int>(0, total_bits - 1)(gen);
+    }
+
+    inline int rand_word(int word_spans) {
+        return std::uniform_int_distribution<int>(0, word_spans - 1)(gen);
+    }
 };
 
 // span 내부 각 비트를 p=0.5로 뒤집되, 최소 min_flips개는 뒤집히도록
@@ -59,15 +70,15 @@ inline std::vector<int> bernoulli_span_min(const int start, const int span_bits,
 // ========== base patterns ==========
 
 // SE: single random bit (항상 정확히 1비트)
-inline std::vector<int> sample_SE(PatternRNG& rng){
-    return { rng.rand_bit() };
+inline std::vector<int> sample_SE(PatternRNG& rng, const PatternShape& shape){
+    return { rng.rand_bit(shape.total_bits) };
 }
 
 // DAE: 항상 인접한 2비트를 함께 뒤집음
-inline std::vector<int> sample_DAE(PatternRNG& rng){
-    int w = rng.rand_word();
-    int b = std::uniform_int_distribution<int>(0, kWordBits - 2)(rng.gen); // 0..14
-    int a = w * kWordBits + b;
+inline std::vector<int> sample_DAE(PatternRNG& rng, const PatternShape& shape){
+    int w = rng.rand_word(shape.word_spans());
+    int b = std::uniform_int_distribution<int>(0, shape.word_bits - 2)(rng.gen);
+    int a = w * shape.word_bits + b;
     int c = a + 1;
     return { a, c };
 }
@@ -78,31 +89,31 @@ inline std::vector<int> sample_DAE(PatternRNG& rng){
 // - sample_SE_plus_PDE_disjoint
 
 // SWL16_aligned: 16비트 정렬 span에서 각 비트를 p=0.5로 뒤집되, 최소 1비트 보장
-inline std::vector<int> sample_SWL16_aligned(PatternRNG& rng){
-    int s = std::uniform_int_distribution<int>(0, kBits / kWordBits - 1)(rng.gen); // 0..15
-    int start = s * kWordBits; // 16*i
-    return bernoulli_span_min(start, kWordBits, rng, /*min_flips=*/1);
+inline std::vector<int> sample_SWL16_aligned(PatternRNG& rng, const PatternShape& shape){
+    int s = std::uniform_int_distribution<int>(0, shape.word_spans() - 1)(rng.gen);
+    int start = s * shape.word_bits;
+    return bernoulli_span_min(start, shape.word_bits, rng, /*min_flips=*/1);
 }
 
 // SWD32_aligned: 32비트 정렬 span에서 각 비트를 p=0.5로 뒤집되, 최소 1비트 보장
-inline std::vector<int> sample_SWD32_aligned(PatternRNG& rng){
-    int s = std::uniform_int_distribution<int>(0, kBits / kDwordBits - 1)(rng.gen); // 0..7
-    int start = s * kDwordBits; // 32*i
-    return bernoulli_span_min(start, kDwordBits, rng, /*min_flips=*/1);
+inline std::vector<int> sample_SWD32_aligned(PatternRNG& rng, const PatternShape& shape){
+    int s = std::uniform_int_distribution<int>(0, shape.dword_spans() - 1)(rng.gen);
+    int start = s * shape.dword_bits;
+    return bernoulli_span_min(start, shape.dword_bits, rng, /*min_flips=*/1);
 }
 
 // shorthand
-inline std::vector<int> sample_SWL16(PatternRNG& rng){
-    return sample_SWL16_aligned(rng);
+inline std::vector<int> sample_SWL16(PatternRNG& rng, const PatternShape& shape){
+    return sample_SWL16_aligned(rng, shape);
 }
-inline std::vector<int> sample_SWD32(PatternRNG& rng){
-    return sample_SWD32_aligned(rng);
+inline std::vector<int> sample_SWD32(PatternRNG& rng, const PatternShape& shape){
+    return sample_SWD32_aligned(rng, shape);
 }
 
-// 256비트 전체에서 각 비트를 p=0.5로 뒤집되, 최소 1비트는 반드시 뒤집힘
-inline std::vector<int> sample_ALL256_half(PatternRNG& rng) {
-    constexpr int span_bits = kBits; // 256
-    std::array<uint64_t, 4> sel{};   // 4*64 = 256 bits
+// codeword 전체에서 각 비트를 p=0.5로 뒤집되, 최소 1비트는 반드시 뒤집힘
+inline std::vector<int> sample_ALL256_half(PatternRNG& rng, const PatternShape& shape) {
+    const int span_bits = shape.total_bits;
+    std::vector<uint64_t> sel((span_bits + 63) / 64, 0);
     int cnt = 0;
 
     // p=0.5로 flip 결정 (rng.gen의 LSB 사용)
@@ -132,46 +143,46 @@ inline std::vector<int> sample_ALL256_half(PatternRNG& rng) {
 
 // ========== disjoint helpers ==========
 
-inline void mark_used(const std::vector<int>& xs, std::array<uint8_t, kBits>& used){
-    for (int b : xs) used[b & (kBits - 1)] = 1u;
+inline void mark_used(const std::vector<int>& xs, std::vector<uint8_t>& used){
+    for (int b : xs) used[b] = 1u;
 }
 
-inline std::vector<int> union_sorted(std::vector<int> a, std::vector<int> b){
-    std::array<uint8_t, kBits> pres{}; // presence bitset
-    for (int x : a) pres[x & (kBits - 1)] = 1u;
-    for (int x : b) pres[x & (kBits - 1)] = 1u;
+inline std::vector<int> union_sorted(std::vector<int> a, std::vector<int> b, const PatternShape& shape){
+    std::vector<uint8_t> pres(shape.total_bits, 0); // presence bitset
+    for (int x : a) pres[x] = 1u;
+    for (int x : b) pres[x] = 1u;
     std::vector<int> out;
     out.reserve(a.size() + b.size());
-    for (int i = 0; i < kBits; ++i) if (pres[i]) out.push_back(i);
+    for (int i = 0; i < shape.total_bits; ++i) if (pres[i]) out.push_back(i);
     return out;
 }
 
 // ========== unique variants (non-overlapping spans) ==========
 
-inline std::vector<int> sample_SE_unique(PatternRNG& rng, const std::array<uint8_t, kBits>& used){
+inline std::vector<int> sample_SE_unique(PatternRNG& rng, const PatternShape& shape, const std::vector<uint8_t>& used){
     for (int t = 0; t < 32; ++t){
-        int b = rng.rand_bit();
-        if (!used[b & (kBits - 1)]) return { b };
+        int b = rng.rand_bit(shape.total_bits);
+        if (!used[b]) return { b };
     }
-    for (int i = 0; i < kBits; ++i) if (!used[i]) return { i };
+    for (int i = 0; i < shape.total_bits; ++i) if (!used[i]) return { i };
     return {};
 }
 
 // DAE_unique: 두 adjacent bit 모두 unused인 span을 찾아,
 // 항상 그 두 비트를 함께 뒤집음
-inline std::vector<int> sample_DAE_unique(PatternRNG& rng, const std::array<uint8_t, kBits>& used){
+inline std::vector<int> sample_DAE_unique(PatternRNG& rng, const PatternShape& shape, const std::vector<uint8_t>& used){
     for (int t = 0; t < 64; ++t){
-        int w = rng.rand_word();
-        int b = std::uniform_int_distribution<int>(0, kWordBits - 2)(rng.gen);
-        int a = w * kWordBits + b;
+        int w = rng.rand_word(shape.word_spans());
+        int b = std::uniform_int_distribution<int>(0, shape.word_bits - 2)(rng.gen);
+        int a = w * shape.word_bits + b;
         int c = a + 1;
         if (!used[a] && !used[c]){
             return { a, c };
         }
     }
-    for (int w = 0; w < kBits / kWordBits; ++w){
-        for (int b = 0; b < kWordBits - 1; ++b){
-            int a = w * kWordBits + b;
+    for (int w = 0; w < shape.word_spans(); ++w){
+        for (int b = 0; b < shape.word_bits - 1; ++b){
+            int a = w * shape.word_bits + b;
             int c = a + 1;
             if (!used[a] && !used[c]){
                 return { a, c };
@@ -184,44 +195,44 @@ inline std::vector<int> sample_DAE_unique(PatternRNG& rng, const std::array<uint
 // [PDE unique 제거]
 
 // SWL16_aligned_unique: span이 완전히 비어 있어야 함. 그 내부에서 p=0.5, 최소 1비트 보장
-inline std::vector<int> sample_SWL16_aligned_unique(PatternRNG& rng, const std::array<uint8_t, kBits>& used){
+inline std::vector<int> sample_SWL16_aligned_unique(PatternRNG& rng, const PatternShape& shape, const std::vector<uint8_t>& used){
     auto ok_span = [&](int start){
-        for (int i = 0; i < kWordBits; ++i) if (used[start + i]) return false;
+        for (int i = 0; i < shape.word_bits; ++i) if (used[start + i]) return false;
         return true;
     };
     for (int t = 0; t < 64; ++t){
-        int s = std::uniform_int_distribution<int>(0, kBits / kWordBits - 1)(rng.gen);
-        int start = s * kWordBits;
+        int s = std::uniform_int_distribution<int>(0, shape.word_spans() - 1)(rng.gen);
+        int start = s * shape.word_bits;
         if (ok_span(start)){
-            return bernoulli_span_min(start, kWordBits, rng, /*min_flips=*/1);
+            return bernoulli_span_min(start, shape.word_bits, rng, /*min_flips=*/1);
         }
     }
-    for (int s = 0; s < kBits / kWordBits; ++s){
-        int start = s * kWordBits;
+    for (int s = 0; s < shape.word_spans(); ++s){
+        int start = s * shape.word_bits;
         if (ok_span(start)){
-            return bernoulli_span_min(start, kWordBits, rng, /*min_flips=*/1);
+            return bernoulli_span_min(start, shape.word_bits, rng, /*min_flips=*/1);
         }
     }
     return {};
 }
 
 // SWD32_aligned_unique: span이 완전히 비어 있어야 함. 그 내부에서 p=0.5, 최소 1비트 보장
-inline std::vector<int> sample_SWD32_aligned_unique(PatternRNG& rng, const std::array<uint8_t, kBits>& used){
+inline std::vector<int> sample_SWD32_aligned_unique(PatternRNG& rng, const PatternShape& shape, const std::vector<uint8_t>& used){
     auto ok_span = [&](int start){
-        for (int i = 0; i < kDwordBits; ++i) if (used[start + i]) return false;
+        for (int i = 0; i < shape.dword_bits; ++i) if (used[start + i]) return false;
         return true;
     };
     for (int t = 0; t < 64; ++t){
-        int s = std::uniform_int_distribution<int>(0, kBits / kDwordBits - 1)(rng.gen);
-        int start = s * kDwordBits;
+        int s = std::uniform_int_distribution<int>(0, shape.dword_spans() - 1)(rng.gen);
+        int start = s * shape.dword_bits;
         if (ok_span(start)){
-            return bernoulli_span_min(start, kDwordBits, rng, /*min_flips=*/1);
+            return bernoulli_span_min(start, shape.dword_bits, rng, /*min_flips=*/1);
         }
     }
-    for (int s = 0; s < kBits / kDwordBits; ++s){
-        int start = s * kDwordBits;
+    for (int s = 0; s < shape.dword_spans(); ++s){
+        int start = s * shape.dword_bits;
         if (ok_span(start)){
-            return bernoulli_span_min(start, kDwordBits, rng, /*min_flips=*/1);
+            return bernoulli_span_min(start, shape.dword_bits, rng, /*min_flips=*/1);
         }
     }
     return {};
@@ -229,47 +240,47 @@ inline std::vector<int> sample_SWD32_aligned_unique(PatternRNG& rng, const std::
 
 // ========== composite patterns (disjoint by construction) ==========
 
-inline std::vector<int> sample_SE_plus_SE_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SE(rng); mark_used(a, used);                 // SE: 항상 1비트
-    auto b = sample_SE_unique(rng, used);                        // 또 다른 1비트
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SE_plus_SE_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SE(rng, shape); mark_used(a, used);                 // SE: 항상 1비트
+    auto b = sample_SE_unique(rng, shape, used);                        // 또 다른 1비트
+    return union_sorted(std::move(a), b, shape);
 }
 
-inline std::vector<int> sample_SE_plus_DAE_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SE(rng); mark_used(a, used);                 // SE: 1비트
-    auto b = sample_DAE_unique(rng, used);                       // DAE: 항상 인접 2비트
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SE_plus_DAE_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SE(rng, shape); mark_used(a, used);                 // SE: 1비트
+    auto b = sample_DAE_unique(rng, shape, used);                       // DAE: 항상 인접 2비트
+    return union_sorted(std::move(a), b, shape);
 }
 
 // [PDE를 포함하는 복합 패턴 제거됨]
 // - sample_SE_plus_PDE_disjoint
 
-inline std::vector<int> sample_SE_plus_SWL_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SE(rng); mark_used(a, used);                 // SE: 1비트
-    auto b = sample_SWL16_aligned_unique(rng, used);             // SWL: span 내에서 p=0.5, 최소 1비트
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SE_plus_SWL_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SE(rng, shape); mark_used(a, used);                 // SE: 1비트
+    auto b = sample_SWL16_aligned_unique(rng, shape, used);             // SWL: span 내에서 p=0.5, 최소 1비트
+    return union_sorted(std::move(a), b, shape);
 }
 
-inline std::vector<int> sample_SE_plus_SWD_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SE(rng); mark_used(a, used);                 // SE: 1비트
-    auto b = sample_SWD32_aligned_unique(rng, used);             // SWD: span 내에서 p=0.5, 최소 1비트
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SE_plus_SWD_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SE(rng, shape); mark_used(a, used);                 // SE: 1비트
+    auto b = sample_SWD32_aligned_unique(rng, shape, used);             // SWD: span 내에서 p=0.5, 최소 1비트
+    return union_sorted(std::move(a), b, shape);
 }
 
-inline std::vector<int> sample_SWL_plus_SWL_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SWL16_aligned_unique(rng, used); mark_used(a, used);
-    auto b = sample_SWL16_aligned_unique(rng, used);
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SWL_plus_SWL_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SWL16_aligned_unique(rng, shape, used); mark_used(a, used);
+    auto b = sample_SWL16_aligned_unique(rng, shape, used);
+    return union_sorted(std::move(a), b, shape);
 }
 
-inline std::vector<int> sample_SWD_plus_SWD_disjoint(PatternRNG& rng){
-    std::array<uint8_t, kBits> used{};
-    auto a = sample_SWD32_aligned_unique(rng, used); mark_used(a, used);
-    auto b = sample_SWD32_aligned_unique(rng, used);
-    return union_sorted(std::move(a), b);
+inline std::vector<int> sample_SWD_plus_SWD_disjoint(PatternRNG& rng, const PatternShape& shape){
+    std::vector<uint8_t> used(shape.total_bits, 0);
+    auto a = sample_SWD32_aligned_unique(rng, shape, used); mark_used(a, used);
+    auto b = sample_SWD32_aligned_unique(rng, shape, used);
+    return union_sorted(std::move(a), b, shape);
 }

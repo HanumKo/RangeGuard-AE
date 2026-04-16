@@ -188,3 +188,101 @@ ECCResult Hbm3Crc16Ssc::decode(const BitBlock256& data_err,
 
     return {corrected_any ? ECCStatus::Corrected : ECCStatus::Clean, corrected};
 }
+
+Hbm3Crc16Ssc::LegacyClassification
+Hbm3Crc16Ssc::classify_legacy(const BitBlock256& original_data,
+                              const BitBlock256& data_err,
+                              const std::vector<bool>& parity_err) const {
+    LegacyClassification out{};
+
+    uint16_t symbols[kCodeSymbols] = {};
+    for (int i = 0; i < 16; ++i) symbols[i] = load_payload_symbol(data_err, i);
+    symbols[16] = bits_to_u16_msb(parity_err, 0);
+    symbols[17] = bits_to_u16_msb(parity_err, 16);
+    symbols[18] = bits_to_u16_msb(parity_err, 32);
+
+    uint16_t S0 = 0;
+    uint16_t S1 = 0;
+    for (int i = 0; i < kCodeSymbols; ++i) {
+        const uint16_t ri = symbols[i];
+        if (ri == 0) continue;
+        const uint16_t ei = gf_log_[ri];
+        if (ei == 0xFFFFu) continue;
+        S0 ^= gf_exp_[ei];
+        S1 ^= gf_exp_[(ei + i) % 65535];
+    }
+
+    if (S0 == 0 && S1 == 0) {
+        out.oecc_status = ECCStatus::Clean;
+    } else if (S0 == 0 || S1 == 0) {
+        out.oecc_status = ECCStatus::DetectedUncorrectable;
+    } else {
+        int err_pos = -1;
+        for (int j = 0; j < kCodeSymbols; ++j) {
+            if (gf_mul(S0, gf_exp_[j]) == S1) {
+                err_pos = j;
+                break;
+            }
+        }
+        if (err_pos < 0) {
+            const uint16_t p = gf_log_[S0];
+            const uint16_t q = gf_log_[S1];
+            if (p != 0xFFFFu && q != 0xFFFFu) {
+                int pos = static_cast<int>(q) - static_cast<int>(p);
+                pos %= 65535;
+                if (pos < 0) pos += 65535;
+                if (0 <= pos && pos < kCodeSymbols) err_pos = pos;
+            }
+        }
+
+        if (0 <= err_pos && err_pos < kCodeSymbols) {
+            symbols[err_pos] ^= S0;
+            out.oecc_status = ECCStatus::Corrected;
+        } else {
+            out.oecc_status = ECCStatus::DetectedUncorrectable;
+        }
+    }
+
+    BitBlock256 corrected = data_err;
+    for (int i = 0; i < 16; ++i) store_payload_symbol(corrected, i, symbols[i]);
+    out.corrected = corrected;
+
+    const uint16_t orig_crc = crc16_ccitt_0init(original_data);
+    const uint16_t recv_crc = symbols[16];
+    const bool same_payload =
+        (corrected.w[0] == original_data.w[0]) &&
+        (corrected.w[1] == original_data.w[1]) &&
+        (corrected.w[2] == original_data.w[2]) &&
+        (corrected.w[3] == original_data.w[3]);
+    const bool same_data272 = same_payload && (recv_crc == orig_crc);
+
+    if ((out.oecc_status == ECCStatus::Clean || out.oecc_status == ECCStatus::Corrected) &&
+        !same_data272) {
+        out.oecc_status = ECCStatus::UndetectedError;
+    }
+
+    const uint16_t crc_calc = crc16_ccitt_0init(corrected);
+    if (crc_calc == recv_crc) {
+        out.secc_status = same_data272 ? ECCStatus::Clean : ECCStatus::UndetectedError;
+    } else {
+        out.secc_status = ECCStatus::DetectedUncorrectable;
+    }
+
+    if (out.secc_status == ECCStatus::UndetectedError) {
+        out.final_status = ECCStatus::UndetectedError;
+    } else if (out.secc_status == ECCStatus::DetectedUncorrectable) {
+        out.final_status = ECCStatus::DetectedUncorrectable;
+    } else {
+        if (out.oecc_status == ECCStatus::UndetectedError) {
+            out.final_status = ECCStatus::UndetectedError;
+        } else if (out.oecc_status == ECCStatus::DetectedUncorrectable) {
+            out.final_status = ECCStatus::DetectedUncorrectable;
+        } else if (out.oecc_status == ECCStatus::Corrected) {
+            out.final_status = ECCStatus::Corrected;
+        } else {
+            out.final_status = ECCStatus::Clean;
+        }
+    }
+
+    return out;
+}

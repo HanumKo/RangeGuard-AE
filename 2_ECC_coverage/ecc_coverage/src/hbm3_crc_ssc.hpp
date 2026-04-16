@@ -13,12 +13,22 @@
 //   [32..47]  : SSC parity p1 (MSB-first)
 class Hbm3Crc16Ssc final : public ECCScheme {
 public:
+    struct LegacyClassification {
+        ECCStatus oecc_status = ECCStatus::Clean;
+        ECCStatus secc_status = ECCStatus::Clean;
+        ECCStatus final_status = ECCStatus::Clean;
+        BitBlock256 corrected{};
+    };
+
     Hbm3Crc16Ssc();
 
     const char* name() const override { return "HBM3-CRC16+SSC"; }
     std::vector<bool> encode(const BitBlock256& data) const override;
     ECCResult decode(const BitBlock256& data_err,
                      const std::vector<bool>& parity) const override;
+    LegacyClassification classify_legacy(const BitBlock256& original_data,
+                                         const BitBlock256& data_err,
+                                         const std::vector<bool>& parity_err) const;
 
 private:
     static constexpr int kPayloadBits = 256;

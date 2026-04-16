@@ -162,29 +162,37 @@ int main(int argc, char** argv){
             for (uint64_t t=0; t<trials; ++t){
                 BitBlock256 d = random_block(gen);
                 auto parity = ecc_ptr->encode(d);
+                const PatternShape shape{static_cast<int>(256 + parity.size())};
 
                 std::vector<int> flips;
-                if      (pat=="SE")         flips = sample_SE(prng);
-                else if (pat=="DAE")        flips = sample_DAE(prng);
-                else if (pat=="16E" || pat=="SWL16")      flips = sample_SWL16(prng);
-                else if (pat=="32E" || pat=="SWD32")      flips = sample_SWD32(prng);
-                else if (pat=="FC" || pat=="FE" || pat=="ALL256")      flips = sample_ALL256_half(prng);
+                if      (pat=="SE")         flips = sample_SE(prng, shape);
+                else if (pat=="DAE")        flips = sample_DAE(prng, shape);
+                else if (pat=="16E" || pat=="SWL16")      flips = sample_SWL16(prng, shape);
+                else if (pat=="32E" || pat=="SWD32")      flips = sample_SWD32(prng, shape);
+                else if (pat=="FC" || pat=="FE" || pat=="ALL256")      flips = sample_ALL256_half(prng, shape);
                 // disjoint composites
-                else if (pat=="SE+SE")      flips = sample_SE_plus_SE_disjoint(prng);
-                else if (pat=="SE+DAE")     flips = sample_SE_plus_DAE_disjoint(prng);
-                else if (pat=="SE+16E" || pat=="SE+SWL")  flips = sample_SE_plus_SWL_disjoint(prng);
-                else if (pat=="SE+32E" || pat=="SE+SWD")  flips = sample_SE_plus_SWD_disjoint(prng);
-                else if (pat=="16E+16E" || pat=="SWL+SWL") flips = sample_SWL_plus_SWL_disjoint(prng);
-                else if (pat=="32E+32E" || pat=="SWD+SWD") flips = sample_SWD_plus_SWD_disjoint(prng);
+                else if (pat=="SE+SE")      flips = sample_SE_plus_SE_disjoint(prng, shape);
+                else if (pat=="SE+DAE")     flips = sample_SE_plus_DAE_disjoint(prng, shape);
+                else if (pat=="SE+16E" || pat=="SE+SWL")  flips = sample_SE_plus_SWL_disjoint(prng, shape);
+                else if (pat=="SE+32E" || pat=="SE+SWD")  flips = sample_SE_plus_SWD_disjoint(prng, shape);
+                else if (pat=="16E+16E" || pat=="SWL+SWL") flips = sample_SWL_plus_SWL_disjoint(prng, shape);
+                else if (pat=="32E+32E" || pat=="SWD+SWD") flips = sample_SWD_plus_SWD_disjoint(prng, shape);
                 else { fprintf(stderr,"Unknown pattern %s\n", pat.c_str()); return 2; }
 
                 // 주입
                 BitBlock256 e = d;
-                for (int ix : flips) e.flip(ix);
+                std::vector<bool> parity_err = parity;
+                for (int ix : flips) {
+                    if (0 <= ix && ix < 256) {
+                        e.flip(ix);
+                    } else if (256 <= ix && ix < 256 + (int)parity_err.size()) {
+                        parity_err[ix - 256] = !parity_err[ix - 256];
+                    }
+                }
                 BitBlock256 v1 = e;
 
-                // 디코드
-                ECCResult r = ecc_ptr->decode(e, parity);
+                const auto* hbm3 = dynamic_cast<const Hbm3Crc16Ssc*>(ecc_ptr.get());
+                ECCResult r = ecc_ptr->decode(e, parity_err);
 
                 auto is_weight_nulling =
                     (std::string(ecc_ptr->name()).rfind("WeightNulling", 0) == 0);
@@ -204,7 +212,9 @@ int main(int argc, char** argv){
                     };
 
                     bool affected[16] = {false};
-                    for (int ix : flips) affected[ix / 16] = true;
+                    for (int ix : flips) {
+                        if (0 <= ix && ix < 256) affected[ix / 16] = true;
+                    }
 
                     const bool detected =
                         (r.status == ECCStatus::Corrected) ||
@@ -221,8 +231,27 @@ int main(int argc, char** argv){
                         if (!policy_zero) { all_policy_zero = false; break; }
                     }
 
-                    if (detected && any_affected && all_policy_zero) ctr.add_DUE(kflips);
-                    else                                             ctr.add_SDC(kflips);
+                    const bool same =
+                        (r.corrected.w[0]==d.w[0])&&(r.corrected.w[1]==d.w[1])&&
+                        (r.corrected.w[2]==d.w[2])&&(r.corrected.w[3]==d.w[3]);
+
+                    if (!any_affected) {
+                        if (same)          ctr.add_CE(kflips);
+                        else if (detected) ctr.add_DUE(kflips);
+                        else               ctr.add_SDC(kflips);
+                    } else if (detected && all_policy_zero) {
+                        ctr.add_DUE(kflips);
+                    } else {
+                        ctr.add_SDC(kflips);
+                    }
+
+                } else if (hbm3 != nullptr) {
+                    const auto legacy = hbm3->classify_legacy(d, e, parity_err);
+                    if (legacy.final_status == ECCStatus::Corrected)      ctr.add_CE(kflips);
+                    else if (legacy.final_status == ECCStatus::DetectedUncorrectable) ctr.add_DUE(kflips);
+                    else if (legacy.final_status == ECCStatus::UndetectedError)       ctr.add_SDC(kflips);
+                    else if (legacy.oecc_status == ECCStatus::Corrected)              ctr.add_CE(kflips);
+                    else                                                              ctr.add_SDC(kflips);
 
                 } else {
                     const std::string nm = ecc_ptr->name();
