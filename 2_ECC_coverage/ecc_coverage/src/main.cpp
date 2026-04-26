@@ -162,7 +162,7 @@ int main(int argc, char** argv){
             for (uint64_t t=0; t<trials; ++t){
                 BitBlock256 d = random_block(gen);
                 auto parity = ecc_ptr->encode(d);
-                const PatternShape shape{static_cast<int>(256 + parity.size())};
+                const PatternShape shape{};
 
                 std::vector<int> flips;
                 if      (pat=="SE")         flips = sample_SE(prng, shape);
@@ -181,18 +181,13 @@ int main(int argc, char** argv){
 
                 // 주입
                 BitBlock256 e = d;
-                std::vector<bool> parity_err = parity;
                 for (int ix : flips) {
-                    if (0 <= ix && ix < 256) {
-                        e.flip(ix);
-                    } else if (256 <= ix && ix < 256 + (int)parity_err.size()) {
-                        parity_err[ix - 256] = !parity_err[ix - 256];
-                    }
+                    if (0 <= ix && ix < 256) e.flip(ix);
                 }
                 BitBlock256 v1 = e;
 
                 const auto* hbm3 = dynamic_cast<const Hbm3Crc16Ssc*>(ecc_ptr.get());
-                ECCResult r = ecc_ptr->decode(e, parity_err);
+                ECCResult r = ecc_ptr->decode(e, parity);
 
                 auto is_weight_nulling =
                     (std::string(ecc_ptr->name()).rfind("WeightNulling", 0) == 0);
@@ -246,7 +241,7 @@ int main(int argc, char** argv){
                     }
 
                 } else if (hbm3 != nullptr) {
-                    const auto legacy = hbm3->classify_legacy(d, e, parity_err);
+                    const auto legacy = hbm3->classify_legacy(d, e, parity);
                     if (legacy.final_status == ECCStatus::Corrected)      ctr.add_CE(kflips);
                     else if (legacy.final_status == ECCStatus::DetectedUncorrectable) ctr.add_DUE(kflips);
                     else if (legacy.final_status == ECCStatus::UndetectedError)       ctr.add_SDC(kflips);

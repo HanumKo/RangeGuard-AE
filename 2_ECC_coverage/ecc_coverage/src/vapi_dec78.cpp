@@ -181,6 +181,7 @@ ECCResult VapiDEC64x4::decode(const BitBlock256& noisy, const std::vector<bool>&
 
     bool any_detected = false;
     bool any_corrected = false;
+    bool any_due = false;
 
     for (int seg=0; seg<4; ++seg){
         // parity 14비트 추출
@@ -193,6 +194,7 @@ ECCResult VapiDEC64x4::decode(const BitBlock256& noisy, const std::vector<bool>&
 
         if (st != 0) any_detected = true;
         if (st > 0)  any_corrected = true;
+        if (st < 0)  any_due = true;
 
         // 데이터 비트 수정 반영
         if (corr.data != noisy.w[seg]){
@@ -200,17 +202,14 @@ ECCResult VapiDEC64x4::decode(const BitBlock256& noisy, const std::vector<bool>&
             r.corrected.w[seg] = corr.data;
         }
         // (패리티 비트는 외부 저장이므로, 여기서 corr.par는 기록용일 뿐)
-        if (st < 0) {
-            // 이론상 오기 어려우나 안전하게 DUE 처리
-            r.status = ECCStatus::DetectedUncorrectable;
-        }
+        if (st < 0) r.status = ECCStatus::DetectedUncorrectable;
     }
 
-    if (any_corrected) {
+    if (any_due) {
+        r.status = ECCStatus::DetectedUncorrectable;
+    } else if (any_corrected) {
         r.status = ECCStatus::Corrected;
     } else if (any_detected && r.status != ECCStatus::DetectedUncorrectable) {
-        // 신드롬이 0이 아닌데 최종 데이터가 우연히 같을 가능성은 사실상 0이므로,
-        // 일반적으로는 above branches에서 걸린다.
         r.status = ECCStatus::Corrected;
     }
     return r;

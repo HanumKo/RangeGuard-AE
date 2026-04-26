@@ -74,13 +74,26 @@ inline std::vector<int> sample_SE(PatternRNG& rng, const PatternShape& shape){
     return { rng.rand_bit(shape.total_bits) };
 }
 
-// DAE: 항상 인접한 2비트를 함께 뒤집음
+// DAE: adjacent 2-bit region을 고른 뒤 각 비트를 p=0.5로 flip.
+// 단, 00이 나오면 01 또는 10으로 강제하여 최소 1비트는 뒤집히게 함.
 inline std::vector<int> sample_DAE(PatternRNG& rng, const PatternShape& shape){
     int w = rng.rand_word(shape.word_spans());
     int b = std::uniform_int_distribution<int>(0, shape.word_bits - 2)(rng.gen);
     int a = w * shape.word_bits + b;
     int c = a + 1;
-    return { a, c };
+
+    bool flip_a = (rng.gen() & 1ULL) != 0;
+    bool flip_c = (rng.gen() & 1ULL) != 0;
+    if (!flip_a && !flip_c) {
+        if (rng.gen() & 1ULL) flip_a = true;
+        else                  flip_c = true;
+    }
+
+    std::vector<int> out;
+    out.reserve(2);
+    if (flip_a) out.push_back(a);
+    if (flip_c) out.push_back(c);
+    return out;
 }
 
 // [PDE 관련 패턴 제거됨]
@@ -168,16 +181,31 @@ inline std::vector<int> sample_SE_unique(PatternRNG& rng, const PatternShape& sh
     return {};
 }
 
-// DAE_unique: 두 adjacent bit 모두 unused인 span을 찾아,
-// 항상 그 두 비트를 함께 뒤집음
+// DAE_unique: 두 adjacent bit 모두 unused인 span을 찾은 뒤,
+// 각 비트를 p=0.5로 flip하되 00이면 01/10으로 강제.
 inline std::vector<int> sample_DAE_unique(PatternRNG& rng, const PatternShape& shape, const std::vector<uint8_t>& used){
+    auto sample_pair = [&](int a, int c) {
+        bool flip_a = (rng.gen() & 1ULL) != 0;
+        bool flip_c = (rng.gen() & 1ULL) != 0;
+        if (!flip_a && !flip_c) {
+            if (rng.gen() & 1ULL) flip_a = true;
+            else                  flip_c = true;
+        }
+
+        std::vector<int> out;
+        out.reserve(2);
+        if (flip_a) out.push_back(a);
+        if (flip_c) out.push_back(c);
+        return out;
+    };
+
     for (int t = 0; t < 64; ++t){
         int w = rng.rand_word(shape.word_spans());
         int b = std::uniform_int_distribution<int>(0, shape.word_bits - 2)(rng.gen);
         int a = w * shape.word_bits + b;
         int c = a + 1;
         if (!used[a] && !used[c]){
-            return { a, c };
+            return sample_pair(a, c);
         }
     }
     for (int w = 0; w < shape.word_spans(); ++w){
@@ -185,7 +213,7 @@ inline std::vector<int> sample_DAE_unique(PatternRNG& rng, const PatternShape& s
             int a = w * shape.word_bits + b;
             int c = a + 1;
             if (!used[a] && !used[c]){
-                return { a, c };
+                return sample_pair(a, c);
             }
         }
     }
