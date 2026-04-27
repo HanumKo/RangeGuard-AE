@@ -132,7 +132,11 @@ def make_plot(csv_path: Path):
     d["scheme"] = d["scheme"].astype(str).str.strip()
     present_schemes = [s for s in desired_scheme_order if s in set(d["scheme"])]
     if not present_schemes:
-        raise ValueError(f"{csv_path}: no matching schemes")
+        found = sorted(set(d["scheme"]))
+        raise ValueError(
+            f"{csv_path}: no matching schemes. "
+            f"found={found}, expected_any_of={desired_scheme_order}"
+        )
 
     fig, ax = plt.subplots()
     legend_handles, legend_names, seen = [], [], set()

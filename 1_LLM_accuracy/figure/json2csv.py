@@ -17,6 +17,8 @@ SCHEME_MAP = {
     "RANGEGUARD_BF16_DSC_FAST": "RG_4b_DSC",
 }
 
+UNKNOWN_BER_LABEL = "unknown"
+
 def find_acc_none(results_obj: Dict[str, Any]) -> Tuple[Optional[str], Optional[float]]:
     if not isinstance(results_obj, dict):
         return (None, None)
@@ -28,30 +30,43 @@ def find_acc_none(results_obj: Dict[str, Any]) -> Tuple[Optional[str], Optional[
                 return (task, None)
     return (None, None)
 
-def parse_path_components(path: str, base_dir: str) -> Tuple[Optional[str], Optional[str], Optional[int], Optional[str], Optional[str]]:
+def map_scheme_name(scheme_raw: str) -> Tuple[str, bool]:
+    mapped = SCHEME_MAP.get(scheme_raw)
+    if mapped is None:
+        return (scheme_raw, False)
+    return (mapped, True)
+
+
+def find_exp_component(parts: List[str]) -> Tuple[Optional[int], Optional[str]]:
+    for part in parts:
+        if not part.startswith("exp_"):
+            continue
+        try:
+            ber_exp = int(part.split("_", 1)[1])
+        except ValueError:
+            return (None, UNKNOWN_BER_LABEL)
+        if ber_exp >= 0:
+            return (ber_exp, f"1e-{ber_exp}")
+        return (None, UNKNOWN_BER_LABEL)
+    return (None, UNKNOWN_BER_LABEL)
+
+
+def parse_path_components(path: str, base_dir: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[bool], Optional[int], Optional[str]]:
     """
-    반환: (model, task, scheme, ber_exp, ber_label)
-    - exp_<N>  -> ber_exp=N, ber_label='1e-<N>'
-    - baseline_* 또는 그 외 -> ber_exp=None, ber_label='baseline'
+    반환: (model, task, scheme, scheme_known, ber_exp, ber_label)
+    - 경로 어딘가의 exp_<N> -> ber_exp=N, ber_label='1e-<N>'
+    - exp_<N>를 찾지 못한 경우 -> ber_exp=None, ber_label='unknown'
     """
     rel = os.path.relpath(path, base_dir)
     parts = rel.split(os.sep)
-    # expected: <model>/<task>/<scheme>/<exp_x>/.../*.json
+    # expected minimum: <model>/<task>/<scheme>/...
     if len(parts) < 4:
-        return (None, None, None, None, None)
-    model, task, scheme_raw, exp_dir = parts[0], parts[1], parts[2], parts[3]
-    scheme = SCHEME_MAP.get(scheme_raw, scheme_raw)
+        return (None, None, None, None, None, None)
 
-    if exp_dir.startswith('exp_'):
-        try:
-            ber_exp = int(exp_dir.split('_', 1)[1])
-        except ValueError:
-            ber_exp = None
-        ber_label = f'1e-{ber_exp}' if isinstance(ber_exp, int) and ber_exp >= 0 else 'baseline'
-        return (model, task, scheme, ber_exp, ber_label)
-
-    # baseline 폴더(예: baseline_none) 포함: 전부 baseline 처리
-    return (model, task, scheme, None, 'baseline')
+    model, task, scheme_raw = parts[0], parts[1], parts[2]
+    scheme, scheme_known = map_scheme_name(scheme_raw)
+    ber_exp, ber_label = find_exp_component(parts[3:])
+    return (model, task, scheme, scheme_known, ber_exp, ber_label)
 
 def collect_json_files(base_dir: str) -> List[str]:
     out = []
@@ -91,13 +106,22 @@ def main():
     per_model_rows: Dict[str, List[Dict[str, Any]]] = {}
     skipped_parse_error = 0
     skipped_unsupported_top_level = 0
+    warned_unknown_schemes = set()
+    warned_unknown_ber_paths = 0
 
     for jp in paths:
-        model, task_from_path, scheme, ber_exp, ber_label = parse_path_components(jp, base_dir)
+        model, task_from_path, scheme, scheme_known, ber_exp, ber_label = parse_path_components(jp, base_dir)
         if model is None or scheme is None:
             continue
         if args.models and model not in args.models:
             continue
+
+        if not scheme_known and scheme not in warned_unknown_schemes:
+            print(f'[warn] Unknown scheme folder name: {scheme} (path={jp})')
+            warned_unknown_schemes.add(scheme)
+
+        if ber_label == UNKNOWN_BER_LABEL:
+            warned_unknown_ber_paths += 1
 
         ber_value = None
         if isinstance(ber_exp, int) and ber_exp >= 0:
@@ -151,7 +175,9 @@ def main():
 
     print(
         f'[json2csv] done: parse_error_skipped={skipped_parse_error}, '
-        f'unsupported_top_level_skipped={skipped_unsupported_top_level}'
+        f'unsupported_top_level_skipped={skipped_unsupported_top_level}, '
+        f'unknown_scheme_count={len(warned_unknown_schemes)}, '
+        f'unknown_ber_paths={warned_unknown_ber_paths}'
     )
 
 if __name__ == '__main__':
